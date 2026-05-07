@@ -1,0 +1,5 @@
+#!/usr/bin/env ruby
+
+$stdout.sync = true
+require "aids"
+AI.run

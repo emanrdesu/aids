@@ -2,7 +2,7 @@ Gem::Specification.new do |spec|
   spec.required_ruby_version = ">= 3.0.0"
 
   spec.name = "aids"
-  spec.version = "0.1.0"
+  spec.version = "1.0.1"
   spec.authors = ["emanrdesu"]
   spec.email = ["janitor@waifu.club"]
   spec.summary = "AI DeepSeek client REPL for the terminal"

@@ -9,11 +9,11 @@ module AI
 
     def self.register(name, desc:, available: nil, arg_complete: nil, &run)
       REGISTRY[name] = Command.new(
-        name: name, desc: desc, available: available, arg_complete: arg_complete, run: run
+        name: name, desc: desc, available: available, arg_complete: arg_complete, run: run,
       )
     end
 
-    def self.find(name)    = REGISTRY[name]
+    def self.find(name) = REGISTRY[name]
     def self.slash?(input) = input.start_with?("/")
 
     def self.available_names(app)
@@ -33,48 +33,42 @@ module AI
     end
 
     register("/discard",
-      desc: "Remove turn(s): /discard [all|N|A-B|A-|-B]",
-      available:    ->(app) { !app.session.empty? },
-      arg_complete: ->(_app, arg) { %w[all].select { |x| x.start_with?(arg) } }
-    ) do |app, args|
+             desc: "Remove turn(s): /discard [*|N|A-B|A-|-B]",
+             available: ->(app) { !app.session.empty? },
+             arg_complete: ->(_app, arg) { %w[*].select { |x| x.start_with?(arg) } }) do |app, args|
       app.discard(args)
     end
 
     register("/title",
-      desc: "Set the session title",
-      available: ->(app) { !app.session.empty? }
-    ) do |app, args|
+             desc: "Set the session title",
+             available: ->(app) { !app.session.empty? }) do |app, args|
       app.set_title(args.strip)
     end
 
     register("/clone",
-      desc: "Clone this session into a new active one",
-      available: ->(app) { !app.session.empty? }
-    ) do |app, _|
+             desc: "Clone this session into a new active one",
+             available: ->(app) { !app.session.empty? }) do |app, _|
       app.clone_session
     end
 
     register("/attach",
-      desc: "Attach a file or directory to the next turn",
-      arg_complete: ->(_app, arg) { Paths.complete(arg) }
-    ) do |app, args|
+             desc: "Attach a file or directory to the next turn",
+             arg_complete: ->(_app, arg) { Paths.complete(arg) }) do |app, args|
       app.attach(args.strip)
     end
 
     register("/detach",
-      desc: "Remove an attachment",
-      available:    ->(app) { app.attachments.any? },
-      arg_complete: ->(app, arg) {
-        app.attachments.map { |p| Paths.short(p) }.select { |s| s.start_with?(arg) }
-      }
-    ) do |app, args|
+             desc: "Remove an attachment",
+             available: ->(app) { app.attachments.any? },
+             arg_complete: ->(app, arg) {
+               app.attachments.map { |p| Paths.short(p) }.select { |s| s.start_with?(arg) }
+             }) do |app, args|
       app.detach(args.strip)
     end
 
     register("/files",
-      desc: "List currently attached files",
-      available: ->(app) { app.attachments.any? }
-    ) do |app, _|
+             desc: "List currently attached files",
+             available: ->(app) { app.attachments.any? }) do |app, _|
       app.list_files
     end
   end

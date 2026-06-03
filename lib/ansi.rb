@@ -3,10 +3,10 @@ module AI
   module Ansi
     module_function
 
-    def reset    = "\e[0m"
-    def bold     = "\e[1m"
-    def dim      = "\e[2m"
-    def fg(n)    = "\e[38;5;#{n}m"
+    def reset = "\e[0m"
+    def bold = "\e[1m"
+    def dim = "\e[2m"
+    def fg(n) = "\e[38;5;#{n}m"
     def strip(s) = s.gsub(/\e\[[\d;]*m/, "")
 
     def width(s)

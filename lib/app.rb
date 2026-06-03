@@ -4,7 +4,7 @@ module AI
     TITLE_PROMPT = "Give a concise title (3-10 words) for this conversation. " \
                    "Respond with ONLY the title, nothing else."
 
-    DISCARD_USAGE = "usage: /discard [all | N | A-B | A- | -B]"
+    DISCARD_USAGE = "usage: /discard [* | N | A-B | A- | -B]"
 
     attr_reader :session, :attachments
 
@@ -12,8 +12,8 @@ module AI
       @key = key; @profile = profile
       @editor = LineEditor.new
       @editor.completer = ->(prefix) { complete(prefix) }
-      @hl     = Highlighter.new
-      @fresh  = true
+      @hl = Highlighter.new
+      @fresh = true
       @attachments = []
       @title_thread = nil
       if resume && (st = Session.all.last) && (s = Session.load(st))
@@ -33,8 +33,7 @@ module AI
 
       print_attachments(attached_data) if attached_data.any?
       puts "\n#{Ansi.fg(p.color)}#{p.icon} #{p.name}#{Ansi.reset}"
-      reply, usage =
-        begin
+      reply, usage = begin
           AI.stream(pending, p.system, @key) { |chunk| print @hl.paint(chunk) }
         rescue Interrupt
           puts "\n#{Ansi.fg(220)}[interrupted — turn discarded]#{Ansi.reset}"
@@ -52,11 +51,10 @@ module AI
 
     def discard(arg)
       arg = arg.to_s.strip
-      return discard_session if arg == "all"
+      return discard_session if arg == "*"
 
       total = @session.turns
-      range =
-        if arg.empty?
+      range = if arg.empty?
           [total, total]
         else
           parsed = parse_discard_arg(arg, total)
@@ -66,7 +64,7 @@ module AI
 
       first, last = range
       first = first.clamp(1, total)
-      last  = last.clamp(1, total)
+      last = last.clamp(1, total)
       if last < first
         notify "no turns in that range"; return
       end
@@ -104,12 +102,12 @@ module AI
       src = @session
       dup = Session.new
       dup.messages = Marshal.load(Marshal.dump(src.messages))
-      dup.usages   = Marshal.load(Marshal.dump(src.usages))
-      dup.title    = src.title ? "#{src.title} (clone)" : "(clone)"
+      dup.usages = Marshal.load(Marshal.dump(src.usages))
+      dup.title = src.title ? "#{src.title} (clone)" : "(clone)"
       dup.save(@profile)
       FileUtils.cp(src.history_file, dup.history_file) if File.exist?(src.history_file)
       @session = dup
-      @fresh   = false
+      @fresh = false
       load_history
       redraw
       notify "cloned to new session"
@@ -155,19 +153,19 @@ module AI
       end
       expanded = File.expand_path(arg)
       targets = if File.directory?(expanded)
-        @attachments.select { |p| File.dirname(p) == expanded }
-      else
-        exact = @attachments.find { |p| Paths.short(p) == arg }
-        if exact
-          [exact]
+          @attachments.select { |p| File.dirname(p) == expanded }
         else
-          @attachments.select { |p|
-            File.fnmatch(arg, File.basename(p)) ||
-            File.fnmatch(arg, Paths.short(p)) ||
-            File.fnmatch(arg, p)
-          }
+          exact = @attachments.find { |p| Paths.short(p) == arg }
+          if exact
+            [exact]
+          else
+            @attachments.select { |p|
+              File.fnmatch(arg, File.basename(p)) ||
+              File.fnmatch(arg, Paths.short(p)) ||
+              File.fnmatch(arg, p)
+            }
+          end
         end
-      end
       if targets.empty?
         notify "no matching attachments: #{arg}"
         return
@@ -187,12 +185,12 @@ module AI
       redraw if @session.messages.any?
       loop do
         puts format_attachment_summary if @attachments.any?
-        result = begin; @editor.readline(build_prompt); rescue Interrupt; break; end
+        result = begin; @editor.readline(build_prompt);           rescue Interrupt; break; end
         case result
-        when nil          then break
-        when :sess_next   then switch_session(+1)
-        when :sess_prev   then switch_session(-1)
-        when :redraw      then redraw
+        when nil then break
+        when :sess_next then switch_session(+1)
+        when :sess_prev then switch_session(-1)
+        when :redraw then redraw
         when :del_session then delete_session
         when String
           t = result.strip
@@ -251,10 +249,10 @@ module AI
     def complete(prefix)
       return nil unless Commands.slash?(prefix)
       if (m = prefix.match(/\A(\/\S+)\s+/))
-        name      = m[1]
+        name = m[1]
         arg_start = m.end(0)
-        arg       = prefix[arg_start..]
-        cmd       = Commands.find(name)
+        arg = prefix[arg_start..]
+        cmd = Commands.find(name)
         return nil unless cmd && cmd.available?(self) && cmd.arg_complete
         { matches: cmd.arg_complete.call(self, arg), start: arg_start }
       else
@@ -264,7 +262,7 @@ module AI
 
     def handle_command(input)
       case Commands.dispatch(self, input)
-      when :unknown     then notify "unknown command: #{input.split.first}"
+      when :unknown then notify "unknown command: #{input.split.first}"
       when :unavailable then notify "not available right now: #{input.split.first}"
       end
     end
@@ -279,7 +277,7 @@ module AI
 
     def center(str)
       cols = IO.console&.winsize&.last || 80
-      pad  = [(cols - Ansi.width(str)) / 2, 0].max
+      pad = [(cols - Ansi.width(str)) / 2, 0].max
       (" " * pad) + str
     end
 
@@ -368,7 +366,7 @@ module AI
     def draw_meta
       all = Session.all
       idx = all.index(@session.stamp)
-      n   = idx ? idx + 1 : all.length + 1
+      n = idx ? idx + 1 : all.length + 1
       total = [all.length, n].max
       puts center("#{CMT_STYLE}session #{n}/#{total}  \u00b7  #{@session.human_time}#{Ansi.reset}")
     end

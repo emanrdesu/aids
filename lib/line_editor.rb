@@ -1,64 +1,70 @@
 module AI
-  # ── Mini line editor with history + Tab completion (with cycling) ────
+  # ── Mini line editor with history + Tab completion ───────────────────
   class LineEditor
     attr_accessor :history, :completer
 
     SIGNALS = {
-      "\ej"     => :sess_next,
-      "\ek"     => :sess_prev,
-      "\el"     => :redraw,  "\eL" => :redraw,
+      "\ej" => :sess_next,
+      "\ek" => :sess_prev,
+      "\el" => :redraw, "\eL" => :redraw,
       "\e[3;7~" => :del_session, "\e\e[3;5~" => :del_session,
-      "\e[3;5~" => :del_session, "\e\e[3^"   => :del_session,
-      "\e[3^"   => :del_session, "\e[3;8~"   => :del_session
+      "\e[3;5~" => :del_session, "\e\e[3^" => :del_session,
+      "\e[3^" => :del_session, "\e[3;8~" => :del_session,
     }.freeze
+
+    PASTE_STYLE = "\e[48;5;18;38;5;231m"
+    BPASTE_ON = "\e[?2004h"
+    BPASTE_OFF = "\e[?2004l"
 
     def initialize; @history = []; @completer = nil; end
 
     def readline(prompt)
-      @prompt = prompt; @buf = +""; @cur = 0
+      @prompt = prompt.to_s; @buf = +""; @cur = 0
       @hpos = @history.length; @stash = nil
-      @prev_rows = 0; @prev_cur_row = 0
+      @prev_rows = 1; @prev_cur_row = 0
       @cycle = nil
+      @pastes = []
+      print BPASTE_ON
       render
-      $stdin.raw do |io|
-        loop do
-          k = read_key(io) or next
-          if (sig = SIGNALS[k]) then return signal(sig) end
-          @cycle = nil unless k == "\t"
-          case k
-          when "\r", "\n" then return submit
-          when "\t"       then handle_tab
-          when "\x03" then end_render; print "\r\n"; raise Interrupt
-          when "\e[3~"
-            @buf.slice!(@cur); render if @cur < @buf.length
-          when "\x02", "\e[D" then move(-1)
-          when "\x06", "\e[C" then move(+1)
-          when "\x01", "\e[H", "\eOH", "\e[1~" then @cur = 0; render
-          when "\x05", "\e[F", "\eOF", "\e[4~" then @cur = @buf.length; render
-          when "\eb"  then @cur = word_back; render
-          when "\ef"  then @cur = word_fwd;  render
-          when "\x10", "\e[A" then history_step(-1)
-          when "\x0e", "\e[B" then history_step(+1)
-          when "\x7f", "\b", "\x08"
-            (@buf.slice!(@cur - 1); @cur -= 1; render) if @cur > 0
-          when "\x04"
-            if @buf.empty? then end_render; print "\r\n"; return nil
-            elsif @cur < @buf.length then @buf.slice!(@cur); render
+      begin
+        $stdin.raw do |io|
+          loop do
+            k = read_key(io) or next
+            if (sig = SIGNALS[k]) then return signal(sig) end
+            @cycle = nil unless k == "\t"
+            case k
+            when "\e[200~" then collect_paste(io)
+            when "\r", "\n" then insert("\n")
+            when "\e\r", "\e\n" then return submit
+            when "\t" then handle_tab
+            when "\x03" then end_render; print "\r\n"; raise Interrupt
+            when "\e[3~" then forward_delete
+            when "\x02", "\e[D" then move(-1)
+            when "\x06", "\e[C" then move(+1)
+            when "\x01", "\e[H", "\eOH", "\e[1~" then @cur = 0; render
+            when "\x05", "\e[F", "\eOF", "\e[4~" then @cur = @buf.length; render
+            when "\eb" then @cur = word_back; render
+            when "\ef" then @cur = word_fwd; render
+            when "\x10", "\e[A" then history_step(-1)
+            when "\x0e", "\e[B" then history_step(+1)
+            when "\x7f", "\b", "\x08" then backspace
+            when "\x04"
+              if @buf.empty? then end_render; print "\r\n"; return nil else forward_delete end
+            when "\x0b" then del_range(@cur, @buf.length); render
+            when "\x15" then del_range(0, @cur); render
+            when "\x17" then j = word_back; del_range(j, @cur); render
+            when "\ed" then j = word_fwd; del_range(@cur, j); render
+            when "\eu" then case_word(:upcase); render
+            when "\eU" then case_word(:downcase); render
+            when "\x14" then transpose; render
+            when "\x0c" then print "\e[H\e[2J"; @prev_rows = 0; @prev_cur_row = 0; render
+            when "\e" then nil
+            else insert(k) if printable?(k)
             end
-          when "\x0b" then @buf.slice!(@cur..);  render
-          when "\x15" then @buf.slice!(0...@cur); @cur = 0; render
-          when "\x17"
-            j = word_back; @buf.slice!(j...@cur); @cur = j; render
-          when "\ed"
-            j = word_fwd;  @buf.slice!(@cur...j); render
-          when "\eu" then case_word(:upcase);   render
-          when "\eU" then case_word(:downcase); render
-          when "\x14" then transpose; render
-          when "\x0c" then print "\e[H\e[2J"; @prev_rows = 0; @prev_cur_row = 0; render
-          when "\e"   then nil
-          else insert(k) if printable?(k)
           end
         end
+      ensure
+        print BPASTE_OFF
       end
     end
 
@@ -69,12 +75,13 @@ module AI
     def submit
       end_render
       print "\r\n"
-      @history << @buf.dup unless @buf.empty? || @buf == @history.last
-      @buf
+      out = @buf.dup
+      @history << out unless out.empty? || out == @history.last
+      out
     end
 
     def end_render
-      down = @prev_rows - 1 - @prev_cur_row
+      down = (@prev_rows - 1) - @prev_cur_row
       print "\e[#{down}B" if down > 0
       print "\r"
     end
@@ -87,38 +94,78 @@ module AI
 
     def printable?(k) = !k.start_with?("\e") && k.ord >= 32
 
-    def insert(k);  @buf.insert(@cur, k); @cur += k.length; render; end
+    # ── Buffer mutations (paste-aware) ───────────────────────────────
+
+    def insert(k)
+      @pastes.each { |p| p[:start] += k.length if p[:start] >= @cur }
+      @buf.insert(@cur, k)
+      @cur += k.length
+      render
+    end
+
+    def del_range(from, to)
+      from = [from, 0].max
+      to = [to, @buf.length].min
+      return if to <= from
+      len = to - from
+      @pastes.reject! { |p| p[:start] >= from && p[:start] + p[:length] <= to }
+      @pastes.each { |p| p[:start] -= len if p[:start] >= to }
+      @buf.slice!(from, len)
+      @cur = from if @cur > from && @cur < to
+      @cur -= len if @cur >= to
+    end
+
+    def backspace
+      return if @cur == 0
+      paste = @pastes.find { |p| @cur == p[:start] + p[:length] }
+      if paste
+        del_range(paste[:start], paste[:start] + paste[:length])
+      else
+        del_range(@cur - 1, @cur)
+      end
+      render
+    end
+
+    def forward_delete
+      return if @cur >= @buf.length
+      paste = @pastes.find { |p| @cur == p[:start] }
+      if paste
+        del_range(paste[:start], paste[:start] + paste[:length])
+      else
+        del_range(@cur, @cur + 1)
+      end
+      render
+    end
 
     def move(d)
       nc = @cur + d
-      (@cur = nc; render) if nc.between?(0, @buf.length)
+      return unless nc.between?(0, @buf.length)
+      paste = @pastes.find { |p| nc > p[:start] && nc < p[:start] + p[:length] }
+      nc = (d > 0 ? paste[:start] + paste[:length] : paste[:start]) if paste
+      @cur = nc; render
     end
+
+    # ── Tab completion ───────────────────────────────────────────────
 
     def handle_tab
       if @cycle
         @cycle[:index] = (@cycle[:index] + 1) % @cycle[:matches].length
-        apply_cycle
-        return
+        apply_cycle; return
       end
-
       return unless @completer
       prefix = @buf[0...@cur]
       result = @completer.call(prefix) or return
       matches, start = result[:matches], result[:start]
       return if matches.nil? || matches.empty?
-
       if matches.length == 1
-        replace_arg(start, matches[0])
-        return
+        replace_arg(start, matches[0]); return
       end
-
       common = matches.reduce do |a, b|
         i = 0
         i += 1 while i < a.length && i < b.length && a[i] == b[i]
         a[0...i]
       end
       current = prefix[start..]
-
       if common.length > current.length
         replace_arg(start, common)
       else
@@ -142,6 +189,8 @@ module AI
       render
     end
 
+    # ── Input reading ────────────────────────────────────────────────
+
     def read_key(io)
       b = io.getbyte or return nil
       return read_escape(io) if b == 27
@@ -162,12 +211,13 @@ module AI
         return "\e\e" unless IO.select([io], nil, nil, 0.05)
         c2 = io.getbyte or return "\e\e"
         c2 == 91 ? read_csi(io, +"\e\e[") : "\e\e#{c2.chr}"
+      when 13, 10 then "\e\r"
       else "\e#{c.chr}"
       end
     end
 
     def read_csi(io, buf)
-      12.times do
+      24.times do
         nb = io.getbyte or break
         buf << nb.chr
         break if nb.between?(64, 126)
@@ -175,31 +225,119 @@ module AI
       buf
     end
 
+    # ── Bracketed paste collection ───────────────────────────────────
+
+    def collect_paste(io)
+      terminator = "\e[201~".bytes
+      raw = +"".b
+      window = []
+      loop do
+        b = io.getbyte or break
+        window << b; window.shift if window.length > terminator.length
+        raw << b.chr
+        break if window == terminator
+      end
+      raw.slice!(-terminator.length, terminator.length) if raw.bytes.last(terminator.length) == terminator
+      text = raw.force_encoding("UTF-8").scrub
+      return if text.empty?
+      text = text.gsub("\r\n", "\n").tr("\r", "\n")
+      start = @cur
+      lines = text.count("\n") + 1
+      @pastes.each { |p| p[:start] += text.length if p[:start] >= @cur }
+      @buf.insert(@cur, text)
+      @pastes << { start: start, length: text.length, lines: lines }
+      @pastes.sort_by! { |p| p[:start] }
+      @cur = start + text.length
+      render
+    end
+
+    # ── Rendering ────────────────────────────────────────────────────
+
+    def paste_label_for(p)
+      n = p[:lines]
+      "#{PASTE_STYLE} #{n} #{n == 1 ? "line" : "lines"} pasted #{Ansi.reset}"
+    end
+
     def render
       cols = (IO.console&.winsize&.last || 80)
       cols = 1 if cols < 1
+
       print "\e[#{@prev_cur_row}A" if @prev_cur_row > 0
       print "\r\e[J"
-      print "#{@prompt}#{@buf}"
 
       prompt_w = Ansi.width(@prompt)
-      total_w  = prompt_w + Ansi.width(@buf)
-      cur_w    = prompt_w + Ansi.width(@buf[0...@cur] || "")
-      total_rows = total_w.zero? ? 1 : ((total_w - 1) / cols) + 1
-      end_row    = total_rows - 1
-      cur_row = cur_w / cols
-      cur_col = cur_w % cols
-      if cur_w.positive? && cur_w == total_w && cur_w % cols == 0
-        cur_row -= 1; cur_col = cols
+      indent = " " * prompt_w
+
+      out = +""
+      out << @prompt
+
+      row = 0
+      col = prompt_w
+      cur_row = 0
+      cur_col = prompt_w
+      cur_recorded = false
+
+      advance = lambda do |w|
+        col += w
+        while col >= cols
+          row += 1
+          col -= cols
+        end
       end
 
+      newline_to_indent = lambda do
+        out << "\r\n" << indent
+        row += 1
+        col = prompt_w
+      end
+
+      i = 0
+      while i <= @buf.length
+        if !cur_recorded && i == @cur
+          cur_row = row; cur_col = col; cur_recorded = true
+        end
+        break if i == @buf.length
+
+        paste = @pastes.find { |p| p[:start] == i }
+        if paste
+          newline_to_indent.call if col != prompt_w
+          label = paste_label_for(paste)
+          out << label
+          advance.call(Ansi.width(label))
+          i += paste[:length]
+          newline_to_indent.call
+          next
+        end
+
+        c = @buf[i]
+        if c == "\n"
+          newline_to_indent.call
+          i += 1
+          next
+        end
+
+        out << c
+        advance.call(Ansi.width(c))
+        i += 1
+      end
+
+      unless cur_recorded
+        cur_row = row; cur_col = col
+      end
+
+      print out
+
+      end_row = row
       print "\r"
       up = end_row - cur_row
-      print "\e[#{up}A"      if up > 0
+      print "\e[#{up}A" if up > 0
       print "\e[#{cur_col}C" if cur_col > 0
-      @prev_rows    = total_rows
+
+      @prev_rows = end_row + 1
       @prev_cur_row = cur_row
     end
+
+    # ── History / word ops ───────────────────────────────────────────
 
     def history_step(d)
       return if @history.empty?
@@ -208,6 +346,7 @@ module AI
       return if np == @hpos
       @hpos = np
       @buf = (@hpos == @history.length ? (@stash || +"") : @history[@hpos]).dup
+      @pastes = []
       @cur = @buf.length; render
     end
 
